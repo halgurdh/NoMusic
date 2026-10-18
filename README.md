@@ -19,7 +19,7 @@ NoMusic is a browser extension that removes background music from tab audio in r
 - Captures the active tab audio stream.
 - Runs speech enhancement in the browser with FastEnhancer compiled ahead of time into a standalone WebAssembly module (no ONNX Runtime), plus Web Audio worklets.
 - Offers multiple audio models (Standard and Lite) to balance between processing power and audio quality.
-- Includes an optional RNNoise denoising stage after enhancement (currently disabled via `RNNOISE_ENABLED` in [offscreen.js](offscreen.js)).
+- Runs an RNNoise denoising stage after FastEnhancer enhancement for additional noise suppression.
 - Auto-follows the active tab when the extension is enabled. Turn off **Turn on automatically** in Settings to start filtering only from the power button.
 - Keeps processing on-device with no backend service.
 - Includes English and Arabic localizations for the popup interface.
@@ -34,14 +34,14 @@ The extension is built around a Manifest V3 service worker and an offscreen docu
 - [offscreen.js](offscreen.js) creates the audio graph and coordinates the real-time processing pipeline.
 - [fastenhancer-worker.js](fastenhancer-worker.js) runs the natively compiled FastEnhancer WASM module in a worker. It processes dual-mono audio only once, and is woken by the audio worklet instead of polling.
 - [ring-buffer-audio-processor.js](ring-buffer-audio-processor.js) bridges audio frames between the Web Audio graph and the worker through shared buffers.
-- [rnnoise-worklet.js](rnnoise-worklet.js) runs RNNoise as an optional AudioWorklet stage (currently disabled).
+- [rnnoise-worklet.js](rnnoise-worklet.js) runs RNNoise as a per-channel AudioWorklet stage after FastEnhancer, for additional noise suppression.
 - [popup.js](popup.js) powers the browser action UI.
 
 At a high level, the pipeline is:
 
 1. Capture the current tab audio.
 2. Feed stereo audio into the FastEnhancer worker.
-3. Optionally pass the enhanced stream through per-channel RNNoise worklets (disabled by default).
+3. Pass the enhanced stream through per-channel RNNoise worklets for additional noise suppression.
 4. Play the processed result back to the user.
 
 ## Project Structure

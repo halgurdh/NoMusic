@@ -77,46 +77,44 @@ let currentVizKey      = 'vizReady';
 let currentHelperKey   = 'helperDefault';
 let currentLoadingStep = null;
 
+const setText = (el, val) => { if (el) el.textContent = val; };
+
 function applyLang(lang) {
   currentLang = lang;
   localStorage.setItem('nomusic_lang', lang);
   document.documentElement.lang = lang;
   document.documentElement.dir  = lang === 'ar' ? 'rtl' : 'ltr';
-  langEN.classList.toggle('active', lang === 'en');
-  langAR.classList.toggle('active', lang === 'ar');
-  document.querySelector('.brand-subtitle').textContent = t('brandSubtitle');
-  document.querySelector('.settings-title').textContent  = t('settingsTitle');
-  document.getElementById('settingContinueLabel').textContent = t('settingContinueLabel');
-  document.getElementById('settingAutoOnLabel').textContent   = t('settingAutoOnLabel');
-  document.getElementById('settingLangLabel').textContent     = t('settingLangLabel');
+  if (langEN) langEN.classList.toggle('active', lang === 'en');
+  if (langAR) langAR.classList.toggle('active', lang === 'ar');
+  setText(document.querySelector('.brand-subtitle'),  t('brandSubtitle'));
+  setText(document.querySelector('.settings-title'),  t('settingsTitle'));
+  setText(document.getElementById('settingContinueLabel'), t('settingContinueLabel'));
+  setText(document.getElementById('settingAutoOnLabel'),   t('settingAutoOnLabel'));
+  setText(document.getElementById('settingLangLabel'),     t('settingLangLabel'));
   refreshDynamicText();
 }
 
 function refreshDynamicText() {
-  powerLabel.textContent = currentPowerOn ? t('powerTurnOff') : t('powerTurnOn');
-  vizLabel.textContent   = t(currentVizKey);
-
-  loadingTitle.textContent = t('loadingTitle');
+  setText(powerLabel,    currentPowerOn ? t('powerTurnOff') : t('powerTurnOn'));
+  setText(vizLabel,      t(currentVizKey));
+  setText(loadingTitle,  t('loadingTitle'));
   if (currentLoadingStep) {
     const sub = 'loadingSub' + currentLoadingStep.charAt(0).toUpperCase() + currentLoadingStep.slice(1);
-    loadingSub.textContent = t(sub) || t('loadingSubDefault');
+    setText(loadingSub, t(sub) || t('loadingSubDefault'));
   } else {
-    loadingSub.textContent = t('loadingSubInit');
+    setText(loadingSub, t('loadingSubInit'));
   }
-
-  if (!activeTabId) tabTitle.textContent = t('tabDetecting');
-
-  // Re-translate model buttons
-  modelLiteBtn.textContent = t('modelLite');
-  modelStdBtn.textContent  = t('modelStd');
+  if (!activeTabId) setText(tabTitle, t('tabDetecting'));
+  setText(modelLiteBtn, t('modelLite'));
+  setText(modelStdBtn,  t('modelStd'));
 }
 
 // Convenience setters
-function setViz(key)    { currentVizKey    = key; vizLabel.textContent   = t(key); }
+function setViz(key)    { currentVizKey    = key; setText(vizLabel,    t(key)); }
 function setHelper(key) { currentHelperKey = key; }
 function setPower(on) {
   currentPowerOn = on;
-  powerLabel.textContent = on ? t('powerTurnOff') : t('powerTurnOn');
+  setText(powerLabel, on ? t('powerTurnOff') : t('powerTurnOn'));
 }
 function setBadge(_state, _label) { /* badge removed — no-op */ }
 
