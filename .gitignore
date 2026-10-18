@@ -1,0 +1,4 @@
+node_modules/
+wasm/runtime/target/
+wasm/test/ref/
+__pycache__/

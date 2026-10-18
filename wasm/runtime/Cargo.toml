@@ -1,0 +1,24 @@
+[package]
+name = "fastenhancer-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "FastEnhancer speech enhancement compiled ahead-of-time to standalone WebAssembly"
+license = "ISC"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+model_s = []
+model_t = []
+# per-kernel timing instrumentation (development only; adds an `env.fe_now` import)
+profile = []
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = false
+strip = true
