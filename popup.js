@@ -30,6 +30,7 @@ const TRANSLATIONS = {
     settingsTitle:            'Settings',
     settingContinueLabel:     'Filter audio in the background',
     settingAutoOnLabel:       'Turn on automatically',
+    settingLangLabel:         'Language',
   },
   ar: {
     brandSubtitle:            'إزالة الموسيقى الخلفية.',
@@ -59,6 +60,7 @@ const TRANSLATIONS = {
     settingsTitle:            'الإعدادات',
     settingContinueLabel:     'استمر في تصفية الصوت في الخلفية',
     settingAutoOnLabel:       'التشغيل تلقائيًا',
+    settingLangLabel:         'اللغة',
   }
 };
 
@@ -86,6 +88,7 @@ function applyLang(lang) {
   document.querySelector('.settings-title').textContent  = t('settingsTitle');
   document.getElementById('settingContinueLabel').textContent = t('settingContinueLabel');
   document.getElementById('settingAutoOnLabel').textContent   = t('settingAutoOnLabel');
+  document.getElementById('settingLangLabel').textContent     = t('settingLangLabel');
   refreshDynamicText();
 }
 
