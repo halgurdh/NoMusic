@@ -14,14 +14,36 @@
     }
   },
   "background": {
-    "scripts": ["background.js"]
+    "scripts": [
+      "background.js"
+    ]
   },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["media-hook.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "media-hook.js"
+      ],
       "all_frames": true,
       "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/fastenhancer_s.wasm",
+        "assets/fastenhancer_t.wasm",
+        "assets/rnnoise.wasm",
+        "fe-worklet.js",
+        "rnnoise-worklet.js"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ]
     }
   ],
   "permissions": [
@@ -46,7 +68,9 @@
       "id": "nomusic@nomusic-extension",
       "strict_min_version": "128.0",
       "data_collection_permissions": {
-        "required": ["none"]
+        "required": [
+          "none"
+        ]
       }
     }
   }

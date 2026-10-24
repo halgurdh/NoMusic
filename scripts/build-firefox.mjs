@@ -24,7 +24,7 @@ const SHARED = [
   'icons/NoMusic(transparent).png',
   'LICENSE'
 ];
-const FIREFOX_ONLY = ['background.js', 'media-hook.js', 'stream-player-worklet.js'];
+const FIREFOX_ONLY = ['background.js', 'media-hook.js', 'fe-worklet.js'];
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });

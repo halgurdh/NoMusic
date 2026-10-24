@@ -67,10 +67,10 @@ At a high level, the pipeline is:
 
 ## Firefox
 
-Firefox has neither `chrome.tabCapture` nor offscreen documents, so the Firefox build captures audio differently:
+Firefox has neither `chrome.tabCapture` nor offscreen documents, so the Firefox build filters audio inside the page instead:
 
-- [firefox/media-hook.js](firefox/media-hook.js) is a content script that routes the page's own `<video>` / `<audio>` elements through Web Audio (`createMediaElementSource`) and streams their audio to the background over a port, so the page itself stays silent.
-- [firefox/background.js](firefox/background.js) runs in Firefox's background page (a real document). It runs the same FastEnhancer WASM models and RNNoise worklet, plays the result through [firefox/stream-player-worklet.js](firefox/stream-player-worklet.js), and answers the same popup messages as the Chrome service worker, so the popup is shared.
+- [firefox/media-hook.js](firefox/media-hook.js) is a content script. It routes the page's own `<video>` / `<audio>` elements through Web Audio (`createMediaElementSource`) and through the same pipeline as Chrome, inside the page's AudioContext: [firefox/fe-worklet.js](firefox/fe-worklet.js) (FastEnhancer as an AudioWorklet), then the shared RNNoise worklet. The worklets run on the playing tab's real-time audio thread.
+- [firefox/background.js](firefox/background.js) only decides which tab is filtered (auto-follow, muting other tabs), and answers the same popup messages as the Chrome service worker, so the popup is shared.
 
 Build and load it:
 
@@ -82,6 +82,7 @@ Limitations compared to Chrome:
 
 - Only HTML media elements are filtered. Audio a page plays straight through its own Web Audio graph (some games and web apps do this) is not captured.
 - Cross-origin media served without CORS headers is left unfiltered. Hooking it would silence it completely. Streaming sites that use Media Source Extensions (`blob:` URLs, e.g. YouTube) work.
+- Pages whose Content-Security-Policy forbids WebAssembly (no `'wasm-unsafe-eval'` / `'unsafe-eval'`) play unfiltered. YouTube allows it.
 
 ## Development Notes
 
