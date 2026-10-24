@@ -21,6 +21,7 @@
   const SAMPLE_RATE = 48000;
   const CHANNEL_COUNT = 2;
   const FE_PROCESSOR_URL = browser.runtime.getURL('fe-worklet.js');
+  const LITE_MODEL_URL = browser.runtime.getURL('assets/fastenhancer_t.wasm');
   const RNNOISE_PROCESSOR_URL = browser.runtime.getURL('rnnoise-worklet.js');
   const RNNOISE_WASM_URL = browser.runtime.getURL('assets/rnnoise.wasm');
   const RNNOISE_ENABLED = true;
@@ -88,6 +89,8 @@
 
   async function createFeNode(url) {
     const bytes = await loadBytes(url);
+    // Any heavier model starts on Lite while Firefox optimizes it (see fe-worklet.js).
+    const liteBytes = url === LITE_MODEL_URL ? null : await loadBytes(LITE_MODEL_URL);
     const node = new AudioWorkletNode(ctx, 'fastenhancer-processor', pageOptions({
       numberOfInputs: 1,
       numberOfOutputs: 1,
@@ -95,7 +98,7 @@
       channelCountMode: 'explicit',
       channelInterpretation: 'speakers',
       outputChannelCount: [CHANNEL_COUNT],
-      processorOptions: { bytes: bytes.slice(0), wet }
+      processorOptions: { bytes: bytes.slice(0), liteBytes: liteBytes && liteBytes.slice(0), wet }
     }));
     await waitReady(node, 'FastEnhancer processor');
     return node;
