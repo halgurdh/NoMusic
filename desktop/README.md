@@ -11,12 +11,46 @@ only run the left FastEnhancer stream.
 
 ## Usage
 
+### Live: remove music from everything the laptop plays
+
+Windows can't take audio away from other apps without a driver, so NoMusic uses the free
+[VB-Audio Virtual Cable](https://vb-audio.com/Cable/):
+
+1. Install VB-Audio Virtual Cable and reboot.
+2. Run `nomusic run`. It captures from **CABLE Output** and plays the filtered audio on your normal
+   speakers or headphones (the default playback device, or `--output NAME`).
+3. In Windows Sound settings, set **CABLE Input** as the default playback device. Games, browsers and
+   everything else now play through NoMusic.
+4. Optional: set CABLE Input/Output to 48000 Hz (Sound settings → device properties). Other rates work but
+   are resampled.
+
+To turn NoMusic off, set your speakers back as the default playback device.
+
+```powershell
+nomusic run [--input NAME] [--output NAME] [--level 0-100] [--no-rnnoise]
+nomusic devices          # list capture and playback devices
+```
+
+The model keeps speech and removes everything else, so game sound effects are reduced along with the
+music. Lower `--level` to blend some of the original back in.
+
+### Try it without the cable
+
+```powershell
+nomusic record 30 test   # records what the speakers play -> test-original.wav, test-nomusic.wav
+```
+
+### Files
+
 ```powershell
 nomusic process input.wav output.wav [--no-rnnoise] [--level 0-100]
 ```
 
 Removes background music from a 48 kHz mono or stereo WAV file. `--level` matches the extension's
 suppression level (100 = fully enhanced, 0 = original audio).
+
+`--dry-run` (for `run`) captures and filters without playing anything, and `--seconds N` stops after N
+seconds. Both are for testing.
 
 ## Building
 
