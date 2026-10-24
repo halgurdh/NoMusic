@@ -65,6 +65,24 @@ At a high level, the pipeline is:
 4. Select Load unpacked.
 5. Choose this project folder.
 
+## Firefox
+
+Firefox has neither `chrome.tabCapture` nor offscreen documents, so the Firefox build captures audio differently:
+
+- [firefox/media-hook.js](firefox/media-hook.js) is a content script that routes the page's own `<video>` / `<audio>` elements through Web Audio (`createMediaElementSource`) and streams their audio to the background over a port, so the page itself stays silent.
+- [firefox/background.js](firefox/background.js) runs in Firefox's background page (a real document). It runs the same FastEnhancer WASM models and RNNoise worklet, plays the result through [firefox/stream-player-worklet.js](firefox/stream-player-worklet.js), and answers the same popup messages as the Chrome service worker, so the popup is shared.
+
+Build and load it:
+
+1. `npm run build:firefox` (writes `dist/firefox`).
+2. In Firefox, open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on**, and pick `dist/firefox/manifest.json`.
+3. To package it for addons.mozilla.org, run `npx web-ext build -s dist/firefox`.
+
+Limitations compared to Chrome:
+
+- Only HTML media elements are filtered. Audio a page plays straight through its own Web Audio graph (some games and web apps do this) is not captured.
+- Cross-origin media served without CORS headers is left unfiltered. Hooking it would silence it completely. Streaming sites that use Media Source Extensions (`blob:` URLs, e.g. YouTube) work.
+
 ## Development Notes
 
 - The extension can be loaded directly from source; the prebuilt `assets/fastenhancer_{s,t}.wasm` modules are committed.
