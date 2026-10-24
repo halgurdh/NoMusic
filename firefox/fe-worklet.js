@@ -12,7 +12,9 @@
  *   2. Standard is compiled asynchronously and warmed up on every WARM_EVERY-th hop (off the output path);
  *   3. once Standard hops average under FAST_MS (typically after 30-60 s), Lite crossfades into Standard.
  *
- * 128-frame render quanta are collected into 512-sample hops; output lags input by one hop.
+ * 128-frame render quanta are collected into 512-sample hops. A hop's work is spread over the four quanta
+ * of the following hop, one model call per quantum (left, right, then warm-up or the crossfade partner),
+ * so no single render quantum pays for a whole stereo hop. Output therefore lags input by two hops.
  */
 
 'use strict';
@@ -20,13 +22,14 @@
 const HOP = 512;
 const QUANTUM = 128;
 const MONO_RESYNC_HOPS = 100;
-const WARM_EVERY = 2;        // warm-up hop rate while Lite is filtering (one channel, so ~half a hop's cost)
+const WARM_EVERY = 2;        // warm-up hop rate while Lite is filtering
 const PROBE_HOPS = 32;       // Standard hops averaged per speed check (the worklet clock is coarse)
-const FAST_MS = 5;           // under half the hop budget: safe to switch
+const FAST_MS = 5;           // per channel, under half the hop budget: safe to switch
 const CROSSFADE_HOPS = 48;   // ~0.5 s
 
 // One FastEnhancer module with a stream per channel, plus the mono dedup from fastenhancer-worker.js:
-// dual-mono hops only run the left stream.
+// dual-mono hops only run the left stream. A hop is processed in two calls, left() then right(), so they
+// can run in different render quanta.
 class Enhancer {
   constructor(instance) {
     const fe = instance.exports;
@@ -46,6 +49,7 @@ class Enhancer {
     this.statesEqual = true;
     this.rightStale = false;
     this.monoRun = 0;
+    this.skipRight = false;
   }
 
   _views() {
@@ -59,8 +63,8 @@ class Enhancer {
     }
   }
 
-  // Processes one hop into this.outL / this.outR.
-  run(inL, inR, wet) {
+  // Loads the hop and runs the left stream into this.outL.
+  runLeft(inL, inR, wet) {
     const fe = this.fe;
     this._views();
     let mono = true;
@@ -80,22 +84,28 @@ class Enhancer {
       this.monoRun = 0;
     }
 
-    if (mono && this.statesEqual) {
-      fe.fe_stream_process(this.left, wet);
+    this.skipRight = mono && this.statesEqual;
+    if (this.skipRight) {
       this.rightStale = true;
-      this.outL.set(this.lOut);
-      this.outR.set(this.lOut);
+    } else {
+      if (this.rightStale) {
+        fe.fe_stream_copy_state(this.right, this.left); // before left advances
+        this.rightStale = false;
+      }
+      this.statesEqual = false;
+    }
+    fe.fe_stream_process(this.left, wet);
+    this.outL.set(this.lOut);
+  }
+
+  // Runs the right stream into this.outR (or copies the left output for dual-mono hops).
+  runRight(wet) {
+    if (this.skipRight) {
+      this.outR.set(this.outL);
       return;
     }
-
-    if (this.rightStale) {
-      fe.fe_stream_copy_state(this.right, this.left);
-      this.rightStale = false;
-    }
-    this.statesEqual = false;
-    fe.fe_stream_process(this.left, wet);
-    fe.fe_stream_process(this.right, wet);
-    this.outL.set(this.lOut);
+    this._views();
+    this.fe.fe_stream_process(this.right, wet);
     this.outR.set(this.rOut);
   }
 
@@ -114,9 +124,13 @@ class FastEnhancerProcessor extends AudioWorkletProcessor {
     super();
     const { bytes, liteBytes, wet } = options.processorOptions || {};
     this.wet = typeof wet === 'number' ? wet : 1;
-    this.inL = new Float32Array(HOP);
+    this.inL = new Float32Array(HOP);     // hop being collected
     this.inR = new Float32Array(HOP);
-    this.outL = new Float32Array(HOP);
+    this.workL = new Float32Array(HOP);   // previous hop, processed during this one
+    this.workR = new Float32Array(HOP);
+    this.resL = new Float32Array(HOP);    // results being produced for workL/workR
+    this.resR = new Float32Array(HOP);
+    this.outL = new Float32Array(HOP);    // results being played
     this.outR = new Float32Array(HOP);
     this.fill = 0;
     this.active = null;      // Enhancer whose output is played
@@ -124,7 +138,7 @@ class FastEnhancerProcessor extends AudioWorkletProcessor {
     this.hopCount = 0;
     this.probeMs = 0;
     this.probeCount = 0;
-    this.fadeHop = -1;       // >= 0 while crossfading active -> pending
+    this.fadeHop = -1;       // >= 0 while crossfading active -> pending, -2 = fade starts next hop
 
     this.port.onmessage = (event) => {
       const data = event.data || {};
@@ -154,48 +168,53 @@ class FastEnhancerProcessor extends AudioWorkletProcessor {
 
   _reset() {
     this.fill = 0;
-    this.outL.fill(0);
-    this.outR.fill(0);
+    for (const b of [this.workL, this.workR, this.resL, this.resR, this.outL, this.outR]) b.fill(0);
     if (this.active) this.active.reset();
   }
 
-  _runHop() {
+  // Task `q` (0-3) of the hop in workL/workR; one model call at most.
+  _task(q) {
+    if (q === 0 && this.fadeHop === -2) this.fadeHop = 0;
     const active = this.active;
     const pending = this.pending;
-    active.run(this.inL, this.inR, this.wet);
+    const fading = this.fadeHop >= 0;
 
-    if (pending && this.fadeHop < 0) {
-      if (++this.hopCount % WARM_EVERY === 0) {
-        this.probeMs += pending.probe(this.inL);
+    if (q === 0) {
+      active.runLeft(this.workL, this.workR, this.wet);
+    } else if (q === 1) {
+      active.runRight(this.wet);
+      if (!fading) {
+        this.resL.set(active.outL);
+        this.resR.set(active.outR);
+      }
+    } else if (q === 2) {
+      if (fading) {
+        pending.runLeft(this.workL, this.workR, this.wet);
+      } else if (pending && this.fadeHop === -1 && ++this.hopCount % WARM_EVERY === 0) {
+        this.probeMs += pending.probe(this.workL);
         if (++this.probeCount === PROBE_HOPS) {
           if (this.probeMs / PROBE_HOPS < FAST_MS) {
             pending.reset();
-            this.fadeHop = 0;
+            this.fadeHop = -2; // the fade starts with the next hop's task 0
           }
           this.probeMs = 0;
           this.probeCount = 0;
         }
       }
-    }
-
-    if (this.fadeHop < 0) {
-      this.outL.set(active.outL);
-      this.outR.set(active.outR);
-      return;
-    }
-
-    // Crossfade Lite -> Standard; Standard's recurrent state settles during the fade.
-    pending.run(this.inL, this.inR, this.wet);
-    for (let i = 0; i < HOP; i++) {
-      const g = Math.min(1, (this.fadeHop * HOP + i) / (CROSSFADE_HOPS * HOP));
-      this.outL[i] = active.outL[i] * (1 - g) + pending.outL[i] * g;
-      this.outR[i] = active.outR[i] * (1 - g) + pending.outR[i] * g;
-    }
-    if (++this.fadeHop >= CROSSFADE_HOPS) {
-      this.active = pending;
-      this.pending = null;
-      this.fadeHop = -1;
-      this.port.postMessage({ type: 'MODEL_SWITCHED', model: 'standard' });
+    } else if (fading) {
+      // Crossfade Lite -> Standard; Standard's recurrent state settles during the fade.
+      pending.runRight(this.wet);
+      for (let i = 0; i < HOP; i++) {
+        const g = Math.min(1, (this.fadeHop * HOP + i) / (CROSSFADE_HOPS * HOP));
+        this.resL[i] = active.outL[i] * (1 - g) + pending.outL[i] * g;
+        this.resR[i] = active.outR[i] * (1 - g) + pending.outR[i] * g;
+      }
+      if (++this.fadeHop >= CROSSFADE_HOPS) {
+        this.active = pending;
+        this.pending = null;
+        this.fadeHop = -1;
+        this.port.postMessage({ type: 'MODEL_SWITCHED', model: 'standard' });
+      }
     }
   }
 
@@ -212,15 +231,20 @@ class FastEnhancerProcessor extends AudioWorkletProcessor {
 
     const inL = input[0];
     const inR = input[1] || inL;
-    // Emit the previous hop's output for this slot, then overwrite the slot with new input.
     outL.set(this.outL.subarray(this.fill, this.fill + QUANTUM));
     if (outR !== outL) outR.set(this.outR.subarray(this.fill, this.fill + QUANTUM));
     this.inL.set(inL, this.fill);
     this.inR.set(inR, this.fill);
+    this._task(this.fill / QUANTUM);
     this.fill += QUANTUM;
+
     if (this.fill === HOP) {
-      this._runHop();
+      // Rotate: finished results start playing, the collected hop becomes the next work item.
       this.fill = 0;
+      let t = this.outL; this.outL = this.resL; this.resL = t;
+      t = this.outR; this.outR = this.resR; this.resR = t;
+      t = this.workL; this.workL = this.inL; this.inL = t;
+      t = this.workR; this.workR = this.inR; this.inR = t;
     }
     return true;
   }
