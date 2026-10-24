@@ -9,8 +9,11 @@
  * and only modules compiled asynchronously are tiered up at all. Baseline Standard costs ~15-25 ms per
  * 10.7 ms hop (slow motion), optimized ~3 ms; Lite is cheap in either tier. So when Standard is selected:
  *   1. Lite filters from the start;
- *   2. Standard is compiled asynchronously and warmed up on every WARM_EVERY-th hop (off the output path);
- *   3. once Standard hops average under FAST_MS (typically after 30-60 s), Lite crossfades into Standard.
+ *   2. Standard is compiled asynchronously and warmed up off the output path: every WARM_EVERY_SLOW-th
+ *      hop while a warm-up call is still slow (each one then costs ~10 ms of the audio thread), every
+ *      WARM_EVERY_FAST-th once it speeds up;
+ *   3. after FAST_WINDOWS consecutive checks average under FAST_MS with no call over SLOW_PROBE_MS
+ *      (typically 30-90 s), Lite crossfades into Standard.
  *
  * 128-frame render quanta are collected into 512-sample hops. A hop's work is spread over the four quanta
  * of the following hop, one model call per quantum (left, right, then warm-up or the crossfade partner),
@@ -22,9 +25,12 @@
 const HOP = 512;
 const QUANTUM = 128;
 const MONO_RESYNC_HOPS = 100;
-const WARM_EVERY = 2;        // warm-up hop rate while Lite is filtering
+const WARM_EVERY_SLOW = 4;   // warm-up hop rate while warm-up calls are still slow
+const WARM_EVERY_FAST = 2;   // ... and once they are fast
+const SLOW_PROBE_MS = 8;     // a warm-up call slower than this backs off to WARM_EVERY_SLOW
 const PROBE_HOPS = 32;       // Standard hops averaged per speed check (the worklet clock is coarse)
-const FAST_MS = 5;           // per channel, under half the hop budget: safe to switch
+const FAST_MS = 5;           // per channel, under half the hop budget
+const FAST_WINDOWS = 3;      // consecutive fast checks before switching
 const CROSSFADE_HOPS = 48;   // ~0.5 s
 
 // One FastEnhancer module with a stream per channel, plus the mono dedup from fastenhancer-worker.js:
@@ -137,7 +143,10 @@ class FastEnhancerProcessor extends AudioWorkletProcessor {
     this.pending = null;     // Standard, while warming up
     this.hopCount = 0;
     this.probeMs = 0;
+    this.probeMax = 0;
     this.probeCount = 0;
+    this.fastWindows = 0;
+    this.warmEvery = WARM_EVERY_SLOW;
     this.fadeHop = -1;       // >= 0 while crossfading active -> pending, -2 = fade starts next hop
 
     this.port.onmessage = (event) => {
@@ -149,10 +158,12 @@ class FastEnhancerProcessor extends AudioWorkletProcessor {
     const fail = (err) => this.port.postMessage({ type: 'ERROR', error: err.message || String(err) });
     try {
       if (liteBytes) {
-        // Lite is cheap even unoptimized, so it can start right away (synchronous compile).
-        this.active = new Enhancer(new WebAssembly.Instance(new WebAssembly.Module(liteBytes), {}));
-        this.port.postMessage({ type: 'PROCESSOR_READY', model: 'lite' });
-        WebAssembly.instantiate(bytes, {}).then(({ instance }) => {
+        // Lite is cheap even unoptimized, so it plays as soon as it is compiled (off the audio thread).
+        WebAssembly.instantiate(liteBytes, {}).then(({ instance }) => {
+          this.active = new Enhancer(instance);
+          this.port.postMessage({ type: 'PROCESSOR_READY', model: 'lite' });
+          return WebAssembly.instantiate(bytes, {});
+        }).then(({ instance }) => {
           this.pending = new Enhancer(instance);
         }).catch(fail);
       } else {
@@ -190,14 +201,20 @@ class FastEnhancerProcessor extends AudioWorkletProcessor {
     } else if (q === 2) {
       if (fading) {
         pending.runLeft(this.workL, this.workR, this.wet);
-      } else if (pending && this.fadeHop === -1 && ++this.hopCount % WARM_EVERY === 0) {
-        this.probeMs += pending.probe(this.workL);
+      } else if (pending && this.fadeHop === -1 && ++this.hopCount % this.warmEvery === 0) {
+        const ms = pending.probe(this.workL);
+        this.warmEvery = ms > SLOW_PROBE_MS ? WARM_EVERY_SLOW : WARM_EVERY_FAST;
+        this.probeMs += ms;
+        this.probeMax = Math.max(this.probeMax, ms);
         if (++this.probeCount === PROBE_HOPS) {
-          if (this.probeMs / PROBE_HOPS < FAST_MS) {
+          const fast = this.probeMs / PROBE_HOPS < FAST_MS && this.probeMax <= SLOW_PROBE_MS;
+          this.fastWindows = fast ? this.fastWindows + 1 : 0;
+          if (this.fastWindows >= FAST_WINDOWS) {
             pending.reset();
             this.fadeHop = -2; // the fade starts with the next hop's task 0
           }
           this.probeMs = 0;
+          this.probeMax = 0;
           this.probeCount = 0;
         }
       }
