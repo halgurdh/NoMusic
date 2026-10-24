@@ -1,5 +1,7 @@
 //! NoMusic desktop.
 //!
+//!   nomusic
+//!       Started without arguments (e.g. double-clicked): an interactive menu that stays open.
 //!   nomusic run [--input NAME] [--output NAME] [--level 0-100] [--no-rnnoise] [--dry-run] [--seconds N]
 //!       Removes background music from system audio, live (see live.rs for the virtual-cable setup).
 //!   nomusic devices
@@ -114,6 +116,72 @@ pub fn write_wav(path: &str, samples: &[f32]) -> Result<(), String> {
     writer.finalize().map_err(|e| format!("{path}: {e}"))
 }
 
+fn read_line() -> Option<String> {
+    let mut line = String::new();
+    match std::io::stdin().read_line(&mut line) {
+        Ok(0) | Err(_) => None, // stdin closed
+        Ok(_) => Some(line.trim().to_lowercase()),
+    }
+}
+
+fn exe_dir() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| ".".into())
+}
+
+/// Menu for people who double-click the exe, so the console window never just flashes and closes.
+fn interactive() -> ExitCode {
+    println!("NoMusic for Windows - removes background music from what your laptop plays.
+");
+    loop {
+        let cable = live::cable_installed();
+        if cable {
+            println!("  [1] Start live filtering (every app that plays through \"CABLE Input\")");
+        } else {
+            println!("  [1] Live filtering needs the free VB-Audio Virtual Cable: open its download page");
+        }
+        println!("  [2] Try it: record 30 seconds of what your speakers play, with and without NoMusic");
+        println!("  [3] List audio devices");
+        println!("  [Q] Quit");
+        print!("> ");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        let Some(choice) = read_line() else { return ExitCode::SUCCESS };
+        println!();
+        let result = match choice.as_str() {
+            "1" if cable => live::run(live::Options {
+                input: None,
+                output: None,
+                rnnoise: true,
+                wet: 1.0,
+                dry_run: false,
+                seconds: None,
+            }),
+            "1" => {
+                println!("Install it, reboot, and start NoMusic again.");
+                std::process::Command::new("explorer.exe").arg("https://vb-audio.com/Cable/").spawn().map(drop).map_err(|e| e.to_string())
+            }
+            "2" => {
+                let dir = exe_dir();
+                let prefix = dir.join("nomusic-test").to_string_lossy().into_owned();
+                let opts = live::Options { input: None, output: None, rnnoise: true, wet: 1.0, dry_run: true, seconds: None };
+                live::record(30, &prefix, &opts).map(|()| {
+                    println!("Play both files to compare.");
+                    let _ = std::process::Command::new("explorer.exe").arg(&dir).spawn();
+                })
+            }
+            "3" => live::list_devices(),
+            "q" | "quit" | "exit" => return ExitCode::SUCCESS,
+            _ => Ok(()),
+        };
+        if let Err(e) = result {
+            println!("error: {e}");
+        }
+        println!();
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
@@ -145,6 +213,7 @@ fn main() -> ExitCode {
             }),
             _ => Err("record needs a number of seconds".into()),
         },
+        None => return interactive(),
         _ => return usage(),
     };
     match result {

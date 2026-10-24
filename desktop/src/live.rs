@@ -62,6 +62,14 @@ fn device_name(device: &Device) -> String {
     device.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "?".into())
 }
 
+/// True when VB-Audio Virtual Cable's capture side is present.
+pub fn cable_installed() -> bool {
+    cpal::default_host()
+        .input_devices()
+        .map(|mut d| d.any(|d| device_name(&d).contains(CABLE_CAPTURE)))
+        .unwrap_or(false)
+}
+
 pub fn list_devices() -> Result<(), String> {
     let host = cpal::default_host();
     println!("Capture devices:");
@@ -395,12 +403,17 @@ pub fn run(opts: Options) -> Result<(), String> {
     }
     println!("Press Ctrl+C to stop.");
 
-    let stop = controls.clone();
-    ctrlc::set_handler(move || stop.running.store(false, Ordering::Relaxed)).map_err(|e| e.to_string())?;
+    // The Ctrl+C handler can only be installed once per process, and the menu may start several runs.
+    static CTRL_C: AtomicBool = AtomicBool::new(false);
+    static HANDLER: std::sync::Once = std::sync::Once::new();
+    HANDLER.call_once(|| {
+        let _ = ctrlc::set_handler(|| CTRL_C.store(true, Ordering::Relaxed));
+    });
+    CTRL_C.store(false, Ordering::Relaxed);
 
     let started = Instant::now();
     let mut last = (0u64, 0u64);
-    while controls.running.load(Ordering::Relaxed) {
+    while controls.running.load(Ordering::Relaxed) && !CTRL_C.load(Ordering::Relaxed) {
         std::thread::sleep(Duration::from_millis(250));
         if opts.seconds.is_some_and(|s| started.elapsed() >= Duration::from_secs(s)) {
             break;
