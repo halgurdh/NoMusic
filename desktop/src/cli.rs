@@ -1,31 +1,28 @@
-//! NoMusic desktop.
+//! nomusic-cli: NoMusic desktop's command-line tool (the tray app is NoMusic.exe).
 //!
-//!   nomusic
+//!   nomusic-cli
 //!       Started without arguments (e.g. double-clicked): an interactive menu that stays open.
-//!   nomusic run [--input NAME] [--output NAME] [--level 0-100] [--no-rnnoise] [--dry-run] [--seconds N]
+//!   nomusic-cli run [--input NAME] [--output NAME] [--level 0-100] [--no-rnnoise] [--dry-run] [--seconds N]
 //!       Removes background music from system audio, live (see live.rs for the virtual-cable setup).
-//!   nomusic devices
+//!   nomusic-cli devices
 //!       Lists capture and playback devices.
-//!   nomusic record <seconds> <prefix> [--input NAME] [--level 0-100] [--no-rnnoise]
+//!   nomusic-cli record <seconds> <prefix> [--input NAME] [--level 0-100] [--no-rnnoise]
 //!       Records what the speakers play and saves it as <prefix>-original.wav and <prefix>-nomusic.wav.
-//!   nomusic process <in.wav> <out.wav> [--no-rnnoise] [--level 0-100]
+//!   nomusic-cli process <in.wav> <out.wav> [--no-rnnoise] [--level 0-100]
 //!       Removes background music from a 48 kHz WAV file (mono or stereo).
-
-mod default_device;
-mod engine;
-mod live;
 
 use std::process::ExitCode;
 
-use engine::{Engine, CHANNELS, LATENCY_FRAMES, SAMPLE_RATE};
+use nomusic::engine::{Engine, CHANNELS, LATENCY_FRAMES, SAMPLE_RATE};
+use nomusic::{live, write_wav};
 
 fn usage() -> ExitCode {
     eprintln!(
         "usage:
-  nomusic run [--input NAME] [--output NAME] [--level 0-100] [--no-rnnoise] [--dry-run] [--seconds N]
-           nomusic devices
-  nomusic record <seconds> <prefix> [--input NAME] [--level 0-100] [--no-rnnoise]
-  nomusic process <in.wav> <out.wav> [--no-rnnoise] [--level 0-100]"
+  nomusic-cli run [--input NAME] [--output NAME] [--level 0-100] [--no-rnnoise] [--dry-run] [--seconds N]
+           nomusic-cli devices
+  nomusic-cli record <seconds> <prefix> [--input NAME] [--level 0-100] [--no-rnnoise]
+  nomusic-cli process <in.wav> <out.wav> [--no-rnnoise] [--level 0-100]"
     );
     ExitCode::from(2)
 }
@@ -100,22 +97,6 @@ fn process_file(input: &str, output: &str, opts: &Options) -> Result<(), String>
     write_wav(output, &out[start..end])
 }
 
-/// Writes interleaved 48 kHz stereo as 16-bit PCM.
-pub fn write_wav(path: &str, samples: &[f32]) -> Result<(), String> {
-    let spec = hound::WavSpec {
-        channels: CHANNELS as u16,
-        sample_rate: SAMPLE_RATE,
-        bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
-    };
-    let mut writer = hound::WavWriter::create(path, spec).map_err(|e| format!("{path}: {e}"))?;
-    for &s in samples {
-        writer
-            .write_sample((s.clamp(-1.0, 1.0) * 32767.0).round() as i16)
-            .map_err(|e| format!("{path}: {e}"))?;
-    }
-    writer.finalize().map_err(|e| format!("{path}: {e}"))
-}
 
 fn read_line() -> Option<String> {
     let mut line = String::new();
