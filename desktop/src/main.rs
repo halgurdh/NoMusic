@@ -11,6 +11,7 @@
 //!   nomusic process <in.wav> <out.wav> [--no-rnnoise] [--level 0-100]
 //!       Removes background music from a 48 kHz WAV file (mono or stereo).
 
+mod default_device;
 mod engine;
 mod live;
 

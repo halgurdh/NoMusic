@@ -406,6 +406,8 @@ dependencies = [
  "hound",
  "nnnoiseless",
  "rtrb",
+ "windows",
+ "windows-core",
 ]
 
 [[package]]

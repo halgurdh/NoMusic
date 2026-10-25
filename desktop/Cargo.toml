@@ -23,6 +23,8 @@ hound = "3.5"
 cpal = "0.18"
 rtrb = "0.4"
 ctrlc = "3"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Console", "Win32_System_Variant", "Win32_UI_Shell_PropertiesSystem", "Win32_Devices_FunctionDiscovery", "Win32_Devices", "Win32_UI_Shell", "Win32_Media", "Win32_System", "Win32_UI"] }
+windows-core = "0.62"
 
 [profile.release]
 opt-level = 3

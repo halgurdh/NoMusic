@@ -16,6 +16,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
 use rtrb::{Consumer, Producer, RingBuffer};
 
+use crate::default_device::{self, CableAsDefault};
 use crate::engine::{Engine, CHANNELS, SAMPLE_RATE};
 
 const CABLE_CAPTURE: &str = "CABLE Output"; // VB-Audio Virtual Cable's recording side
@@ -297,6 +298,8 @@ fn build_playback(device: &Device, mut processed: Consumer<f32>, controls: Arc<C
 }
 
 pub struct Session {
+    // First field, so it is dropped first: the speakers become the default again before streams stop.
+    cable_default: Option<CableAsDefault>,
     _capture: Stream,
     _playback: Option<Stream>,
     worker: Option<std::thread::JoinHandle<()>>,
@@ -308,6 +311,9 @@ pub struct Session {
 
 impl Session {
     pub fn start(opts: &Options, controls: Arc<Controls>) -> Result<Session, String> {
+        if let Some(name) = default_device::recover(CABLE_PLAYBACK) {
+            println!("Restored \"{name}\" as the default playback device (NoMusic did not exit cleanly last time).");
+        }
         let devices = pick_devices(opts)?;
         let (raw_tx, mut raw_rx) = RingBuffer::<f32>::new(RING_SAMPLES);
         let (mut out_tx, out_rx) = RingBuffer::<f32>::new(RING_SAMPLES);
@@ -369,7 +375,24 @@ impl Session {
             p.play().map_err(|e| format!("playback device: {e}"))?;
         }
 
+        // Live filtering of the cable: route every app into it, and back to the speakers when we stop.
+        let output_name = device_name(&devices.output);
+        let cable_default = if !opts.dry_run && device_name(&devices.input).contains(CABLE_CAPTURE) {
+            let speakers = default_device::playback_endpoints().into_iter().find(|e| e.name == output_name);
+            match speakers.map(|s| CableAsDefault::activate(CABLE_PLAYBACK, s)) {
+                Some(Ok(switch)) => Some(switch),
+                Some(Err(e)) => {
+                    eprintln!("could not make \"{CABLE_PLAYBACK}\" the default playback device ({e}); set it in Sound settings");
+                    None
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+
         Ok(Session {
+            cable_default,
             _capture: capture,
             _playback: playback,
             worker: Some(worker),
@@ -398,8 +421,15 @@ pub fn run(opts: Options) -> Result<(), String> {
     if session.input_rate != SAMPLE_RATE {
         println!("note: the capture device runs at {} Hz; set it to 48000 Hz in Sound settings for the best quality", session.input_rate);
     }
-    if !opts.dry_run && session.input_name.contains(CABLE_CAPTURE) {
-        println!("Set \"{CABLE_PLAYBACK}\" as the default playback device so every app plays through NoMusic.");
+    match &session.cable_default {
+        Some(switch) => println!(
+            "All apps now play through NoMusic. \"{}\" becomes the default playback device again when NoMusic stops.",
+            switch.restore_name()
+        ),
+        None if !opts.dry_run && session.input_name.contains(CABLE_CAPTURE) => {
+            println!("Set \"{CABLE_PLAYBACK}\" as the default playback device so every app plays through NoMusic.")
+        }
+        None => {}
     }
     println!("Press Ctrl+C to stop.");
 
